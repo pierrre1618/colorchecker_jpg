@@ -1,7 +1,7 @@
 
 # Enhanced ColorChecker Grid Tool
 
-This repository contains an application that helps you generate and apply a deformed 3D LUT (Look-Up Table) for color correction using a ColorChecker grid. The tool provides an interactive web interface for capturing reference and extracted color values, and then either exporting a cube file or applying the LUT directly to an image. The code is built on Flask and uses HTML, CSS, and JavaScript (with Canvas) for the front end.
+This repository contains an application that helps you generate and apply a 3D LUT (Look-Up Table) for color correction using a ColorChecker grid. The tool provides an interactive web interface for capturing reference and extracted color values, and then either exporting a cube file or applying the LUT directly to an image. The code is built on Flask and uses HTML, CSS, and JavaScript (with Canvas) for the front end.
 
 ## Project Structure
 
