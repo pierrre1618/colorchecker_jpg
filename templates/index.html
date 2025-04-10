@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Enhanced ColorChecker Grid Tool</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f2f5;
+      margin: 0;
+    }
+    h1 { text-align: center; }
+    #controls, #instructions {
+      margin-top: 15px;
+      text-align: center;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      margin-top: 10px;
+      background: #fff;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .color-matrices {
+      display: flex;
+      justify-content: center;
+      gap: 50px;
+      margin-top: 15px;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 0 auto;
+    }
+    td {
+      width: 30px; 
+      height: 30px; 
+      border: 1px solid #ddd;
+      text-align: center; 
+      vertical-align: middle;
+    }
+    input[type="color"] {
+      border: none;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      background: transparent;
+    }
+    .option-group {
+      margin-top: 10px;
+    }
+    .option-group label {
+      margin-right: 15px;
+      font-weight: bold;
+    }
+    #instructions {
+      background: #e9ecef;
+      padding: 10px;
+      border: 1px solid #ccc;
+      max-width: 600px;
+      margin: 10px auto;
+    }
+    button {
+      margin-right: 10px;
+      padding: 8px 16px;
+      font-size: 14px;
+      border: none;
+      border-radius: 4px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    button:disabled {
+      background-color: #aaa;
+      cursor: not-allowed;
+    }
+    /* Loading Overlay */
+    #loadingOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 20px;
+      flex-direction: column;
+    }
+    .spinner {
+      border: 8px solid #f3f3f3;
+      border-top: 8px solid #007bff;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 15px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    /* Preview image styling */
+    #previewContainer {
+      text-align: center;
+      margin-top: 15px;
+    }
+    #previewContainer img {
+      max-width: 300px;
+      border: 1px solid #ccc;
+      display: block;
+      margin: 0 auto 10px auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Enhanced ColorChecker Grid Tool</h1>
+  <div id="controls">
+    <input type="file" id="imageLoader" accept="image/*"/><br>
+    <div class="option-group">
+      <label>
+        <input type="radio" name="gridMode" value="interactive" checked>
+        Interactive Grid (drag corners)
+      </label>
+      <label>
+        <input type="radio" name="gridMode" value="manual">
+        Manual Corner Picking (4 clicks; colors extract automatically)
+      </label>
+    </div>
+    <div class="option-group">
+      <label for="rows">Rows:</label>
+      <input type="number" id="rows" min="1" value="4">
+      <label for="cols">Columns:</label>
+      <input type="number" id="cols" min="1" value="6">
+    </div>
+    <!-- Note: Extract Colors button is removed because auto-update is active -->
+    <button id="resetGrid">Reset Grid</button>
+    <button id="generateLut">Download Cube File</button>
+    <button id="applyLut">Apply LUT</button>
+  </div>
+  
+  <!-- Instruction area for guidance -->
+  <div id="instructions">
+    Please load an image. In Interactive Mode (default), a grid with draggable red handles is shown and colors update as you move them.
+    In Manual Mode, simply click 4 times anywhere on the image to define the corners (order doesn’t matter). Colors will be extracted automatically.
+  </div>
+  
+  <!-- Canvas for grid editing -->
+  <canvas id="imageCanvas"></canvas>
+  
+  <!-- Side-by-side color matrices -->
+  <div class="color-matrices">
+    <div id="referenceColors">
+      <h3>Reference Colors</h3>
+      <div id="refGridContainer"></div>
+    </div>
+    <div id="extractedColors">
+      <h3>Extracted Colors</h3>
+      <div id="extGridContainer"></div>
+    </div>
+  </div>
+  
+  <!-- Preview section for processed image and download link -->
+  <div id="previewContainer">
+    <h3>Preview Processed Image</h3>
+    <!-- Processed image and download link will be injected here -->
+  </div>
+
+  <!-- Loading overlay when applying LUT -->
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div>Please wait, processing image...</div>
+  </div>
+  
+  <script>
+    var canvas = document.getElementById('imageCanvas');
+    var ctx = canvas.getContext('2d');
+    var imageLoader = document.getElementById('imageLoader');
+    var img = new Image();
+    var originalImageDataURL = null; // stores full-resolution image data
+    var gridPoints = [];
+    var rows, cols;
+    var refColors = [];
+    var extractedValues = [];
+    var manualPoints = [];  // for manual mode clicks
+    var currentMode = "interactive"; // default mode
+    
+    // Pre-defined classic ColorChecker colors (4x6)
+    const classicColorChecker = [
+      ["#735244", "#C29682", "#627A9D", "#576C43", "#8580B1", "#67BDAA"],
+      ["#D67E2C", "#505BA6", "#C15A63", "#5E3C6C", "#9DBC40", "#E0A32E"],
+      ["#383D96", "#469449", "#AF363C", "#E7C71F", "#BB5695", "#0885A1"],
+      ["#F3F3F2", "#C8C8C8", "#A0A0A0", "#7A7A79", "#555555", "#343434"]
+    ];
+    
+    function hexToRgba(hex, alpha) {
+      const r = parseInt(hex.substr(1,2), 16);
+      const g = parseInt(hex.substr(3,2), 16);
+      const b = parseInt(hex.substr(5,2), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+    
+    function adjustCanvasSize() {
+      const maxW = window.innerWidth - 40;
+      const maxH = window.innerHeight - 200;
+      const scale = Math.min(1, maxW / img.width, maxH / img.height);
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      return scale;
+    }
+    
+    // Automatically reset grid when an image is loaded.
+    imageLoader.addEventListener('change', function(e) {
+      var reader = new FileReader();
+      reader.onload = function(event) {
+        originalImageDataURL = event.target.result;
+        img.onload = function() {
+          adjustCanvasSize();
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resetGrid();
+        }
+        img.src = event.target.result;
+      }
+      reader.readAsDataURL(e.target.files[0]);
+    });
+    
+    // Listen for grid mode changes and update instructions.
+    document.getElementsByName('gridMode').forEach(function(radio){
+      radio.addEventListener('change', function(e) {
+        currentMode = e.target.value;
+        manualPoints = [];
+        updateInstructions();
+        drawGridOverlay();
+      });
+    });
+    
+    function updateInstructions() {
+      const inst = document.getElementById('instructions');
+      if (currentMode === "manual") {
+        inst.textContent = "Manual Mode: Click 4 times anywhere on the image to define the corners. Colors will be extracted automatically when all points are set.";
+      } else {
+        inst.textContent = "Interactive Mode: A default grid with draggable red handles is shown. Colors update automatically when you move the corners.";
+      }
+    }
+    
+    // Grid drawing routines
+    function drawGridOverlay() {
+      if (!img.src) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      
+      if (gridPoints.length < 4) return;
+      
+      // Draw outer boundary
+      ctx.strokeStyle = "lime";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gridPoints[0].x, gridPoints[0].y);
+      ctx.lineTo(gridPoints[1].x, gridPoints[1].y);
+      ctx.lineTo(gridPoints[2].x, gridPoints[2].y);
+      ctx.lineTo(gridPoints[3].x, gridPoints[3].y);
+      ctx.closePath();
+      ctx.stroke();
+      
+      // Helper: interpolate between grid corners
+      function interp(u, t) {
+        let topX = gridPoints[0].x + t * (gridPoints[1].x - gridPoints[0].x);
+        let topY = gridPoints[0].y + t * (gridPoints[1].y - gridPoints[0].y);
+        let botX = gridPoints[3].x + t * (gridPoints[2].x - gridPoints[3].x);
+        let botY = gridPoints[3].y + t * (gridPoints[2].y - gridPoints[3].y);
+        return { x: topX + u * (botX - topX), y: topY + u * (botY - topY) };
+      }
+      
+      // Draw grid lines
+      ctx.strokeStyle = "yellow";
+      ctx.lineWidth = 1;
+      for (let j = 1; j < cols; j++) {
+        ctx.beginPath();
+        let t = j / cols;
+        let start = interp(0, t);
+        ctx.moveTo(start.x, start.y);
+        for (let i = 0; i <= rows; i++) {
+          let u = i / rows;
+          let pt = interp(u, t);
+          ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+      for (let i = 1; i < rows; i++) {
+        ctx.beginPath();
+        let u = i / rows;
+        let start = interp(u, 0);
+        ctx.moveTo(start.x, start.y);
+        for (let j = 0; j <= cols; j++) {
+          let t = j / cols;
+          let pt = interp(u, t);
+          ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+      
+      // Draw draggable handles (red circles) for interactive mode
+      if (currentMode === "interactive") {
+        gridPoints.forEach(function(point) {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = "red";
+          ctx.fill();
+        });
+      }
+      
+      // Draw reference grid overlay for each cell with semi-transparent fill
+      for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+          let topLeft = interp(i / rows, j / cols);
+          let topRight = interp(i / rows, (j + 1) / cols);
+          let bottomRight = interp((i + 1) / rows, (j + 1) / cols);
+          let bottomLeft = interp((i + 1) / rows, j / cols);
+          let cellColor = (refColors[i] && refColors[i][j]) ? refColors[i][j] : "#ffffff";
+          ctx.beginPath();
+          ctx.moveTo(topLeft.x, topLeft.y);
+          ctx.lineTo(topRight.x, topRight.y);
+          ctx.lineTo(bottomRight.x, bottomRight.y);
+          ctx.lineTo(bottomLeft.x, bottomLeft.y);
+          ctx.closePath();
+          ctx.fillStyle = hexToRgba(cellColor, 0.3);
+          ctx.fill();
+          ctx.strokeStyle = cellColor;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+    
+    // Create the reference color grid
+    function createReferenceGrid() {
+      refColors = [];
+      let container = document.getElementById('refGridContainer');
+      container.innerHTML = "";
+      let table = document.createElement('table');
+      for (let i = 0; i < rows; i++) {
+        let tr = document.createElement('tr');
+        refColors[i] = [];
+        for (let j = 0; j < cols; j++) {
+          let td = document.createElement('td');
+          let input = document.createElement('input');
+          input.type = "color";
+          if (rows === 4 && cols === 6) {
+            input.value = classicColorChecker[i][j];
+            refColors[i][j] = classicColorChecker[i][j];
+          } else {
+            input.value = "#ffffff";
+            refColors[i][j] = "#ffffff";
+          }
+          input.addEventListener('input', function() {
+            refColors[i][j] = input.value;
+            drawGridOverlay();
+          });
+          td.appendChild(input);
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      container.appendChild(table);
+    }
+    
+    // Reorder four manual points into a convex, counter-clockwise list.
+    function orderManualPoints(points) {
+      let cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+      let cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+      return points.slice().sort((a, b) => {
+        return Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx);
+      });
+    }
+    
+    // Extract grid colors using provided 4 points (assumed ordered as top-left, top-right, bottom-right, bottom-left)
+    function extractColorsFromPoints(points) {
+      let offCanvas = document.createElement('canvas');
+      offCanvas.width = canvas.width;
+      offCanvas.height = canvas.height;
+      let offCtx = offCanvas.getContext('2d');
+      offCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      function interp(u, t, pts) {
+        let topX = pts[0].x + t * (pts[1].x - pts[0].x);
+        let topY = pts[0].y + t * (pts[1].y - pts[0].y);
+        let botX = pts[3].x + t * (pts[2].x - pts[3].x);
+        let botY = pts[3].y + t * (pts[2].y - pts[3].y);
+        return { x: topX + u * (botX - topX), y: topY + u * (botY - topY) };
+      }
+      let extracted = [];
+      for (let i = 0; i < rows; i++) {
+        extracted[i] = [];
+        let u0 = (i + 0.5) / rows;
+        for (let j = 0; j < cols; j++) {
+          let t0 = (j + 0.5) / cols;
+          let pt = interp(u0, t0, points);
+          let pixel = offCtx.getImageData(Math.floor(pt.x), Math.floor(pt.y), 1, 1).data;
+          let r = pixel[0].toString(16).padStart(2, '0');
+          let g = pixel[1].toString(16).padStart(2, '0');
+          let b = pixel[2].toString(16).padStart(2, '0');
+          extracted[i][j] = "#" + r + g + b;
+        }
+      }
+      return extracted;
+    }
+    
+    // Compute squared color difference between two hex colors.
+    function computeColorDifference(hex1, hex2) {
+      const r1 = parseInt(hex1.substr(1,2),16);
+      const g1 = parseInt(hex1.substr(3,2),16);
+      const b1 = parseInt(hex1.substr(5,2),16);
+      const r2 = parseInt(hex2.substr(1,2),16);
+      const g2 = parseInt(hex2.substr(3,2),16);
+      const b2 = parseInt(hex2.substr(5,2),16);
+      return Math.pow(r1 - r2,2) + Math.pow(g1 - g2,2) + Math.pow(b1 - b2,2);
+    }
+    
+    // Rotate an array (returns a new array rotated left by n positions)
+    function rotateArray(arr, n) {
+      return arr.slice(n).concat(arr.slice(0, n));
+    }
+    
+    // Try the 4 rotations and choose the one with the lowest total error compared to reference colors.
+    function autoAdjustManualGrid() {
+      let orderedPoints = orderManualPoints(manualPoints);
+      let bestError = Infinity;
+      let bestRotation = 0;
+      let bestExtracted = null;
+      
+      for (let n = 0; n < 4; n++) {
+        let rotatedPoints = rotateArray(orderedPoints, n);
+        let extracted = extractColorsFromPoints(rotatedPoints);
+        let totalError = 0;
+        for (let i = 0; i < rows; i++) {
+          for (let j = 0; j < cols; j++) {
+            totalError += computeColorDifference(extracted[i][j], refColors[i][j]);
+          }
+        }
+        if (totalError < bestError) {
+          bestError = totalError;
+          bestRotation = n;
+          bestExtracted = extracted;
+        }
+      }
+      gridPoints = rotateArray(orderedPoints, bestRotation);
+      manualPoints = [];
+      drawGridOverlay();
+      extractedValues = bestExtracted;
+      displayExtractedGrid(bestExtracted);
+      document.getElementById('instructions').textContent = "Manual Mode complete. Best grid orientation applied.";
+    }
+    
+    // Extract grid colors using current gridPoints.
+    function extractGridColors() {
+      if (!img.src) return;
+      let offCanvas = document.createElement('canvas');
+      offCanvas.width = canvas.width;
+      offCanvas.height = canvas.height;
+      let offCtx = offCanvas.getContext('2d');
+      offCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      function interp(u, t) {
+        let topX = gridPoints[0].x + t * (gridPoints[1].x - gridPoints[0].x);
+        let topY = gridPoints[0].y + t * (gridPoints[1].y - gridPoints[0].y);
+        let botX = gridPoints[3].x + t * (gridPoints[2].x - gridPoints[3].x);
+        let botY = gridPoints[3].y + t * (gridPoints[2].y - gridPoints[3].y);
+        return { x: topX + u * (botX - topX), y: topY + u * (botY - topY) };
+      }
+      let extracted = [];
+      for (let i = 0; i < rows; i++) {
+        extracted[i] = [];
+        let u0 = (i + 0.5) / rows;
+        for (let j = 0; j < cols; j++) {
+          let t0 = (j + 0.5) / cols;
+          let pt = interp(u0, t0);
+          let pixel = offCtx.getImageData(Math.floor(pt.x), Math.floor(pt.y), 1, 1).data;
+          let r = pixel[0].toString(16).padStart(2, '0');
+          let g = pixel[1].toString(16).padStart(2, '0');
+          let b = pixel[2].toString(16).padStart(2, '0');
+          extracted[i][j] = "#" + r + g + b;
+        }
+      }
+      extractedValues = extracted;
+      displayExtractedGrid(extracted);
+    }
+    
+    function displayExtractedGrid(gridColors) {
+      let container = document.getElementById('extGridContainer');
+      container.innerHTML = "";
+      let table = document.createElement('table');
+      for (let i = 0; i < gridColors.length; i++) {
+        let tr = document.createElement('tr');
+        for (let j = 0; j < gridColors[i].length; j++) {
+          let td = document.createElement('td');
+          td.style.backgroundColor = gridColors[i][j];
+          td.title = gridColors[i][j];
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      container.appendChild(table);
+    }
+    
+    // For interactive mode: dragging grid handles.
+    var selectedPoint = null;
+    canvas.addEventListener('mousedown', function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      if (currentMode === "interactive") {
+        gridPoints.forEach(function(point, index) {
+          if (Math.hypot(mouseX - point.x, mouseY - point.y) < 10) {
+            selectedPoint = index;
+          }
+        });
+      }
+    });
+    
+    canvas.addEventListener('mousemove', function(e) {
+      if (currentMode === "interactive" && selectedPoint !== null) {
+        const rect = canvas.getBoundingClientRect();
+        gridPoints[selectedPoint].x = e.clientX - rect.left;
+        gridPoints[selectedPoint].y = e.clientY - rect.top;
+        drawGridOverlay();
+      }
+    });
+    
+    canvas.addEventListener('mouseup', function(e) {
+      if (currentMode === "interactive" && selectedPoint !== null) {
+        // Update extracted colors automatically when dragging stops.
+        extractGridColors();
+      }
+      selectedPoint = null;
+    });
+    
+    canvas.addEventListener('mouseout', function() {
+      selectedPoint = null;
+    });
+    
+    // For manual mode: capture clicks on canvas.
+    canvas.addEventListener('click', function(e) {
+      if (currentMode === "manual") {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        manualPoints.push({ x: clickX, y: clickY });
+        updateInstructions();
+        // Draw a red dot at the click location.
+        ctx.beginPath();
+        ctx.arc(clickX, clickY, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = "red";
+        ctx.fill();
+        if (manualPoints.length === 4) {
+          autoAdjustManualGrid();
+        }
+      }
+    });
+    
+    // Initialize/reset grid based on current mode.
+    function resetGrid() {
+      rows = parseInt(document.getElementById('rows').value);
+      cols = parseInt(document.getElementById('cols').value);
+      createReferenceGrid();
+      manualPoints = [];
+      if (currentMode === "interactive") {
+        gridPoints = [
+          { x: 50, y: 50 },
+          { x: canvas.width - 50, y: 50 },
+          { x: canvas.width - 50, y: canvas.height - 50 },
+          { x: 50, y: canvas.height - 50 }
+        ];
+        drawGridOverlay();
+        // Auto-extract colors immediately for interactive mode.
+        extractGridColors();
+      } else if (currentMode === "manual") {
+        gridPoints = [];
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        document.getElementById('instructions').textContent = "Manual Mode: Click 4 times anywhere on the image to define the corners.";
+      }
+    }
+    
+    // Flatten grid arrays for LUT generation.
+    function flattenGrid(grid) {
+      return grid.reduce((acc, row) => acc.concat(row), []);
+    }
+    
+    function generateLUT() {
+      if (!refColors || !extractedValues || refColors.length === 0 || extractedValues.length === 0) {
+        alert("Please ensure you have both reference and extracted color data.");
+        return;
+      }
+      const before_data = flattenGrid(extractedValues);
+      const after_data = flattenGrid(refColors);
+      fetch("/generate_lut", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ before_data: before_data, after_data: after_data })
+      })
+      .then(response => {
+        if (!response.ok) throw new Error("Network response was not ok");
+        return response.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = url;
+        a.download = "deformed_lut.cube";
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(error => console.error("Error generating LUT:", error));
+    }
+    
+    function applyLUT() {
+      if (!originalImageDataURL) {
+        alert("No original image available. Please load an image first.");
+        return;
+      }
+      // Show the loading overlay.
+      document.getElementById("loadingOverlay").style.display = "flex";
+      const base64Image = originalImageDataURL.replace(/^data:image\/(png|jpeg);base64,/, "");
+      const before_data  = flattenGrid(extractedValues);
+      const after_data = flattenGrid(refColors);
+      fetch("/apply_lut", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_data: base64Image,
+          before_data: before_data,
+          after_data: after_data
+        })
+      })
+      .then(response => {
+        if (!response.ok) throw new Error("Network response was not ok");
+        return response.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const previewContainer = document.getElementById("previewContainer");
+        previewContainer.innerHTML = "";
+        const resultImg = document.createElement("img");
+        resultImg.src = url;
+        previewContainer.appendChild(resultImg);
+        // Create a download link below the result image.
+        const downloadLink = document.createElement("a");
+        downloadLink.href = url;
+        downloadLink.download = "image-with-lut-applied.png";
+        downloadLink.textContent = "Download Processed Image (Original Size)";
+        previewContainer.appendChild(downloadLink);
+        // Hide loading overlay once done.
+        document.getElementById("loadingOverlay").style.display = "none";
+      })
+      .catch(error => {
+        console.error("Error applying LUT:", error);
+        document.getElementById("loadingOverlay").style.display = "none";
+      });
+    }
+    
+    document.getElementById('resetGrid').addEventListener('click', function() {
+      if (!img.src) {
+        alert("Please load an image first.");
+        return;
+      }
+      resetGrid();
+    });
+    
+    document.getElementById('generateLut').addEventListener('click', function(){
+      generateLUT();
+    });
+    document.getElementById('applyLut').addEventListener('click', function(){
+      applyLUT();
+    });
+    
+    // Initialize instructions on load.
+    updateInstructions();
+  </script>
+</body>
+</html>
