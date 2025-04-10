@@ -105,6 +105,12 @@ Open your browser and navigate to [http://127.0.0.1:5000](http://127.0.0.1:5000)
 
 ![Screenshot](images/capture.png)
 
+4. **Apply LUT with Photoshop:**
+To obtain the best results it is better to download the LUT table and apply it the image with Photoshop
+![Screenshot](images/photoshop_step1.png)
+![Screenshot](images/photoshop_step2.png)
+![Screenshot](images/photoshop_step3.png)
+
 
 ## Contributing
 
