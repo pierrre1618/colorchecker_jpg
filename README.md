@@ -111,6 +111,8 @@ To obtain the best results it is better to download the LUT table and apply it t
 ![Screenshot](images/photoshop_step2.png)
 ![Screenshot](images/photoshop_step3.png)
 
+## Important Notes
+The correction is not perfect because of the non lineariry of the input image but this could help to correct images in some cases.
 
 ## Contributing
 
